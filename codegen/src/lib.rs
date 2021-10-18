@@ -21,9 +21,10 @@ extern crate proc_macro;
 #[macro_use]
 extern crate maplit;
 
+use futures::TryStreamExt;
 use lazy_static::lazy_static;
 use proc_macro::{Delimiter, Group, Ident, TokenStream, TokenTree};
-use sqlx::Connection;
+use sqlx::{Connection, Row};
 
 // Note: the use of that macro is a bit unusial. It works like this:
 //     𝖋𝖎𝖑𝖙𝖊𝖗_𝖝𝟴𝟲_𝖒𝖆𝖗𝖐𝖊𝖗𝖘! {
@@ -349,16 +350,32 @@ lazy_static! {
 async fn get_instrution_info() -> String {
     let root_path = std::env::current_dir().expect("Obtaining crate root path");
     let root_path = root_path.to_str().expect("Turning crate root path into unicode string");
+    println!("Hello  {}!", root_path);
     // Note: during regular build root_path points to the yace workspace root, but in doctests
     // we get nested crate root.  Try to access both paths.
     let database_url = format!("sqlite:{}/test.db", root_path);
     let database_url_fallback = format!("sqlite:{}/../test.db", root_path);
-    let _pool = if let Ok(pool) = sqlx::SqliteConnection::connect(database_url.as_str()).await {
+    let mut pool = if let Ok(pool) = sqlx::SqliteConnection::connect(database_url.as_str()).await {
         pool
     } else {
         sqlx::SqliteConnection::connect(database_url_fallback.as_str())
             .await
             .expect("Failed to connect to test.db database")
     };
+    let row: (i64,) = sqlx:: query_as("SELECT $1")
+          .bind(150_i64)
+          .fetch_one(&mut pool)
+          .await
+          .expect("Failed to fetch from test.db database");
+
+    assert_eq!(row.0,150);
+
+    let mut rows = sqlx::query("SELECT * FROM instructions")
+        .fetch(&mut pool);
+    while let Some(row) = rows.try_next().await.expect("Heh") {
+        let instruction_name : &str =row.try_get("instruction_name").expect("whatever");
+        println!("instruction_name: {}", instruction_name);
+    }
+
     root_path.to_string()
 }
